@@ -1,0 +1,14 @@
+{
+  "name": "PEZ-FRIO USB",
+  "version": "1.0",
+  "new_install_prompt_erase": false,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP8266",
+      "parts": [
+        { "path": "pezfrio_usb.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

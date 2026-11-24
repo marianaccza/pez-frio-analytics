@@ -45,10 +45,11 @@ fecha_hora,temperatura_interna,temperatura_ambiente,humedad_relativa
 
 ## Cargar el programa en la placa
 
+- **Sin Arduino IDE (recomendado):** abrir `instalar.html` desde GitHub Pages en Chrome o Edge
+  (https://marianaccza.github.io/pez-frio-analytics/instalar.html) y pulsar «Instalar programa en la placa».
+  Usa ESP Web Tools con `firmware/manifest.json`, que carga `pezfrio_usb.bin` en la dirección `0x0`.
 - **Con Arduino IDE:** abrir `pezfrio_usb.ino`, elegir la placa «NodeMCU 1.0 (ESP-12E Module)» y subir.
   Necesita las bibliotecas OneWire, DallasTemperature y DHT sensor library (Adafruit).
-- **Sin Arduino IDE:** cargar `pezfrio_usb.bin` en la dirección `0x0` con una herramienta web de flasheo
-  para ESP8266 (por ejemplo esptool-js, de Espressif). Esta vía no se ha probado todavía.
 
 ## Qué no incluye todavía
 

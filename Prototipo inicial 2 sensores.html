@@ -600,6 +600,7 @@ $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();if(!q)
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#searchInput').focus();}});
 data=demoRows();renderAll();
 </script><!-- ===== MODO EN VIVO (USB) · agregado en la rama en-vivo-usb ===== -->
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
 <style>
 #liveBox{position:fixed;right:16px;bottom:16px;z-index:60;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;background:var(--tile);border:1px solid var(--line);border-radius:var(--rad);box-shadow:0 18px 40px rgba(0,10,18,.5);color:var(--ink)}
 #liveBox>summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;gap:8px;font-weight:600}
@@ -621,6 +622,7 @@ data=demoRows();renderAll();
 .lvRow select{background:var(--tile2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 6px}
 .lvRow .lvBtn{width:auto;margin:0;padding:5px 9px}
 #liveMsg,#liveFile{margin:9px 0 0;color:var(--sub);line-height:1.45}
+#lvInstall{display:block}
 </style>
 <details id="liveBox" open>
 <summary><span id="liveDot"></span><span>En vivo (USB)</span><span id="liveState" style="margin-left:auto;font-weight:400;color:var(--sub)">Sin conectar</span></summary>
@@ -631,6 +633,7 @@ data=demoRows();renderAll();
 <div class="lvCell" id="lcExt"><small>Exterior (sonda)</small><b id="lvExt">—</b></div>
 <div class="lvCell" id="lcHum"><small>Humedad interior</small><b id="lvHum">—</b></div>
 </div>
+<esp-web-install-button id="lvInstall" manifest="firmware/manifest.json"><button slot="activate" class="lvBtn" type="button">Instalar programa en la placa (solo la primera vez)</button><span slot="unsupported"></span><span slot="not-allowed"><small style="display:block;margin-top:6px;color:var(--sub)">Para instalar el programa, abre esta página desde GitHub Pages.</small></span></esp-web-install-button>
 <button class="lvBtn primary" id="lvConnect" type="button">Conectar placa</button>
 <button class="lvBtn" id="lvPick" type="button">Guardar CSV automáticamente…</button>
 <button class="lvBtn" id="lvDownload" type="button">Descargar CSV ahora</button>
@@ -644,7 +647,7 @@ data=demoRows();renderAll();
 </select></div>
 <div class="lvRow"><label><input type="checkbox" id="lvSound" checked> Sonido de alerta</label><button class="lvBtn" id="lvNew" type="button">Nueva sesión</button></div>
 <div id="liveMsg"></div>
-<div id="liveFile"></div>
+<div id="liveFile"></div><a href="instalar.html" target="_blank" rel="noopener" style="display:block;margin-top:10px;color:var(--cyan)">¿Problemas? Ver la ayuda paso a paso</a>
 </div>
 </details>
 <script>
@@ -655,6 +658,7 @@ const $$=id=>document.getElementById(id);
 const hasSerial='serial' in navigator,hasFS='showSaveFilePicker' in window;
 const p2=n=>String(n).padStart(2,'0');
 let port=null,reader=null,reading=false,latest=null,rows=[],timer=null,fileHandle=null,saving=false,pending=false;
+let connectedAt=0,otherLines=0,hinted=false,installing=false;
 let alertKey='',lastBeep=0,viewLive=true,audio=null,streak={temp:0,ambient:0,humidity:0};
 
 function stamp(ms){const d=new Date(ms);return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`}
@@ -796,7 +800,7 @@ function num(s,lo,hi){
   const v=+s;return Number.isFinite(v)&&v>=lo&&v<=hi?v:null;
 }
 function onLine(line){
-  if(!line.startsWith('PEZ,'))return;                 // las líneas que empiezan por # se ignoran
+  if(!line.startsWith('PEZ,')){if(line&&!line.startsWith('#'))otherLines++;return}  // las líneas que empiezan por # se ignoran
   const f=line.split(',');
   if(f.length<4)return;
   latest={temp:num(f[1],-40,80),ambient:num(f[2],-55,125),humidity:num(f[3],0,100),at:Date.now()};
@@ -831,8 +835,8 @@ async function readLoop(){
   }
   reading=false;
   try{await port.close()}catch(e){}
-  setState('Desconectada','bad');
-  msg('La placa se desconectó. Revisa el cable USB y pulsa «Conectar placa».');
+  setState(installing?'Lista para instalar':'Desconectada',installing?'warn':'bad');
+  msg(installing?'Instalando el programa… Cuando la ventana diga que terminó, ciérrala y pulsa «Conectar placa».':'La placa se desconectó. Revisa el cable USB y pulsa «Conectar placa».');
 }
 async function connect(auto){
   if(!hasSerial)return;
@@ -844,7 +848,7 @@ async function connect(auto){
       if(!port)return;
     }
     await port.open({baudRate:115200});
-    reading=true;streak={temp:0,ambient:0,humidity:0};
+    reading=true;streak={temp:0,ambient:0,humidity:0};connectedAt=Date.now();otherLines=0;hinted=false;installing=false;
     setState('Conectada · esperando datos…','warn');
     msg('Placa conectada. Si no llegan datos en unos segundos, pulsa el botón RST de la placa.');
     startTimer();readLoop();
@@ -856,6 +860,7 @@ async function connect(auto){
 }
 setInterval(()=>{
   if(!reading)return;
+  if(!latest&&!hinted&&Date.now()-connectedAt>8000){hinted=true;msg(otherLines?'La placa responde, pero no tiene el programa de PEZ-FRÍO. Pulsa «Instalar programa en la placa» y después vuelve a conectar.':'No llegan datos. Pulsa el botón RST de la placa; si sigue igual, pulsa «Instalar programa en la placa» y después vuelve a conectar.')}
   const s=latest?Math.round((Date.now()-latest.at)/1000):null;
   if(s!==null&&s<=15)setState('En vivo · hace '+s+' s','on');
   else if(latest)setState('Sin datos hace '+s+' s','bad');
@@ -865,6 +870,8 @@ setInterval(()=>{
 try{const saved=localStorage.getItem(KEYI);if(saved&&[...$$('lvEvery').options].some(o=>o.value===saved))$$('lvEvery').value=saved}catch(e){}
 $$('lvEvery').onchange=()=>{try{localStorage.setItem(KEYI,$$('lvEvery').value)}catch(e){}if(reading)startTimer();updateInfo();if(rows.length)showPage()};
 $$('lvConnect').onclick=()=>connect(false);
+// Antes de instalar, se libera el puerto (solo un programa puede usarlo a la vez)
+$$('lvInstall').addEventListener('click',()=>{installing=true;msg('Instalando el programa… Cuando la ventana diga que terminó, ciérrala y pulsa «Conectar placa».');if(reading){reading=false;try{reader&&reader.cancel()}catch(e){}}},true);
 $$('lvPick').onclick=pickFile;
 $$('lvDownload').onclick=()=>{if(!rows.length){msg('Todavía no hay registros para descargar.');return}download()};
 $$('lvNew').onclick=()=>{

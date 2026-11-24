@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PEZ-FRÍO · Instalar programa en la placa</title>
+<script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<style>
+:root{--bg:#031925;--tile:#082a3b;--tile2:#0a3042;--line:#176078;--ink:#f0fbff;--sub:#93b7c9;--cyan:#14dce8;--gold:#f5b34c;--orange:#fa825a}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 62% -15%,#0a4050 0%,#052332 41%,#031924 80%);color:var(--ink);font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:1.55}
+main{max-width:720px;margin:0 auto;padding:32px 16px 48px}
+h1{font-size:26px;margin:0 0 4px}
+.sub{color:var(--sub);margin:0 0 24px}
+.step{background:var(--tile);border:1px solid var(--line);border-radius:17px;padding:18px 20px;margin:0 0 14px}
+.step h2{font-size:17px;margin:0 0 8px;display:flex;gap:10px;align-items:center}
+.n{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:var(--cyan);color:#032033;font-size:14px;flex:none}
+.step p,.step li{color:var(--sub);margin:6px 0}
+.step ul{margin:6px 0;padding-left:20px}
+.btn{display:inline-block;margin-top:10px;padding:12px 20px;border:0;border-radius:12px;background:var(--cyan);color:#032033;font-weight:700;font-size:15px;text-decoration:none;cursor:pointer}
+.warn{border-color:var(--gold)}
+.warn p{color:#ffe2b0}
+code{background:var(--tile2);padding:1px 6px;border-radius:6px;color:var(--ink)}
+strong{color:var(--ink)}
+</style>
+</head>
+<body>
+<main>
+<h1>PEZ-FRÍO · Instalar programa en la placa</h1>
+<p class="sub">Solo hay que hacerlo una vez. No necesitas Arduino IDE.</p>
+
+<div class="step warn">
+<p><strong>Requisitos:</strong> un computador con <strong>Chrome o Edge</strong> (Firefox y Safari no sirven) y un cable USB que transmita datos, no uno que solo carga.</p>
+</div>
+
+<div class="step">
+<h2><span class="n">1</span>Conecta la placa</h2>
+<p>Conecta la NodeMCU al computador con el cable USB. Si tienes Arduino IDE abierto, ciérralo.</p>
+</div>
+
+<div class="step">
+<h2><span class="n">2</span>Instala el programa</h2>
+<p>Pulsa el botón, elige el puerto de la placa (suele llamarse <code>CP210x</code> o <code>USB-SERIAL CH340</code>) y pulsa <strong>Conectar</strong>.
+En la ventana que aparece (está en inglés) pulsa <strong>Install PEZ-FRIO USB</strong> y luego <strong>Install</strong>. Espera a que llegue al 100 % y cierra la ventana.</p>
+<esp-web-install-button manifest="firmware/manifest.json">
+<button slot="activate" class="btn">Instalar programa en la placa</button>
+<span slot="unsupported"><p><strong>Este navegador no puede instalar el programa.</strong> Abre esta página en Chrome o Edge, en un computador.</p></span>
+<span slot="not-allowed"><p><strong>Esta página debe abrirse desde internet (https).</strong> Ábrela desde el enlace de GitHub Pages, no desde un archivo del computador.</p></span>
+</esp-web-install-button>
+<ul>
+<li><strong>Si no aparece ningún puerto:</strong> prueba otro cable USB. Si sigue sin aparecer, instala el driver del chip USB de la placa (CP210x de Silicon Labs, o CH340) y vuelve a conectarla.</li>
+<li><strong>Si falla al conectar:</strong> mantén presionado el botón <strong>FLASH</strong> de la placa, pulsa instalar y suéltalo cuando empiece a avanzar.</li>
+</ul>
+</div>
+
+<div class="step">
+<h2><span class="n">3</span>Mira los datos en vivo</h2>
+<p>Abre el monitor y, en el panel «En vivo (USB)», pulsa <strong>Conectar placa</strong>. Para guardar los datos, pulsa <strong>Guardar CSV automáticamente…</strong></p>
+<a class="btn" href="Prototipo%20inicial%202%20sensores.html">Abrir el monitor en vivo</a>
+</div>
+
+<div class="step">
+<h2><span class="n">?</span>Conexiones de los sensores</h2>
+<ul>
+<li><strong>DHT22 (interior):</strong> <code>+</code> a 3V3, <code>-</code> a GND y la señal (<code>OUT</code> o <code>S</code>) a <code>D5</code>.</li>
+<li><strong>Sonda DS18B20 (exterior):</strong> rojo a 3V3, negro a GND y amarillo a <code>D2</code>, con una resistencia de 4.7 kΩ entre el amarillo y 3V3.</li>
+</ul>
+</div>
+</main>
+</body>
+</html>

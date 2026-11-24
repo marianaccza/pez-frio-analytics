@@ -599,4 +599,292 @@ $('#saveSettings').onclick=()=>{
 $('#searchInput').oninput=e=>{const q=e.target.value.toLowerCase().trim();if(!q)return;const keys=[['ensayos','ensayos'],['comparación','comparacion'],['comparacion','comparacion'],['reportes','reportes'],['alertas','alertas'],['configuración','configuracion'],['configuracion','configuracion']];const hit=keys.find(([key])=>key.includes(q));if(hit)changePage(hit[1]);};
 document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();$('#searchInput').focus();}});
 data=demoRows();renderAll();
-</script></body></html>
+</script><!-- ===== MODO EN VIVO (USB) · agregado en la rama en-vivo-usb ===== -->
+<style>
+#liveBox{position:fixed;right:16px;bottom:16px;z-index:60;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;background:var(--tile);border:1px solid var(--line);border-radius:var(--rad);box-shadow:0 18px 40px rgba(0,10,18,.5);color:var(--ink)}
+#liveBox>summary{list-style:none;cursor:pointer;padding:12px 14px;display:flex;align-items:center;gap:8px;font-weight:600}
+#liveBox>summary::-webkit-details-marker{display:none}
+#liveDot{width:10px;height:10px;border-radius:50%;background:var(--muted);flex:none}
+#liveDot.on{background:var(--green)}#liveDot.warn{background:var(--gold)}#liveDot.bad{background:var(--orange)}
+#liveBody{padding:0 14px 14px}
+.lvGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 10px}
+.lvCell{background:var(--tile2);border:1px solid var(--lineSoft);border-radius:12px;padding:8px 4px;text-align:center}
+.lvCell small{display:block;color:var(--sub);font-size:11px}
+.lvCell b{font-size:19px;font-variant-numeric:tabular-nums}
+.lvCell.bad b{color:var(--orange)}.lvCell.warn b{color:var(--gold)}
+#liveAlert{display:none;margin:0 0 10px;padding:8px 10px;border-radius:10px;border:1px solid var(--orange);background:rgba(250,130,90,.12);color:#ffd2c4;line-height:1.45}
+#liveAlert.show{display:block}
+.lvBtn{display:block;width:100%;margin:6px 0 0;padding:9px 10px;background:transparent;color:var(--ink);border:1px solid var(--line);border-radius:10px}
+.lvBtn.primary{background:var(--cyan);color:#032033;border-color:var(--cyan);font-weight:600}
+.lvBtn:disabled{opacity:.5;cursor:not-allowed}
+.lvRow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:9px 0 0;color:var(--sub)}
+.lvRow select{background:var(--tile2);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:5px 6px}
+.lvRow .lvBtn{width:auto;margin:0;padding:5px 9px}
+#liveMsg,#liveFile{margin:9px 0 0;color:var(--sub);line-height:1.45}
+</style>
+<details id="liveBox" open>
+<summary><span id="liveDot"></span><span>En vivo (USB)</span><span id="liveState" style="margin-left:auto;font-weight:400;color:var(--sub)">Sin conectar</span></summary>
+<div id="liveBody">
+<div id="liveAlert"></div>
+<div class="lvGrid">
+<div class="lvCell" id="lcInt"><small>Interior (DHT)</small><b id="lvInt">—</b></div>
+<div class="lvCell" id="lcExt"><small>Exterior (sonda)</small><b id="lvExt">—</b></div>
+<div class="lvCell" id="lcHum"><small>Humedad interior</small><b id="lvHum">—</b></div>
+</div>
+<button class="lvBtn primary" id="lvConnect" type="button">Conectar placa</button>
+<button class="lvBtn" id="lvPick" type="button">Guardar CSV automáticamente…</button>
+<button class="lvBtn" id="lvDownload" type="button">Descargar CSV ahora</button>
+<div class="lvRow"><label for="lvEvery">Registrar cada</label>
+<select id="lvEvery">
+<option value="30000">30 segundos (pruebas)</option>
+<option value="60000">1 minuto</option>
+<option value="300000" selected>5 minutos</option>
+<option value="600000">10 minutos</option>
+<option value="1800000">30 minutos</option>
+</select></div>
+<div class="lvRow"><label><input type="checkbox" id="lvSound" checked> Sonido de alerta</label><button class="lvBtn" id="lvNew" type="button">Nueva sesión</button></div>
+<div id="liveMsg"></div>
+<div id="liveFile"></div>
+</div>
+</details>
+<script>
+(()=>{
+'use strict';
+const LIVE='En vivo (USB)',KEY='pezfrio_en_vivo_v1',KEYI='pezfrio_en_vivo_cada';
+const $$=id=>document.getElementById(id);
+const hasSerial='serial' in navigator,hasFS='showSaveFilePicker' in window;
+const p2=n=>String(n).padStart(2,'0');
+let port=null,reader=null,reading=false,latest=null,rows=[],timer=null,fileHandle=null,saving=false,pending=false;
+let alertKey='',lastBeep=0,viewLive=true,audio=null,streak={temp:0,ambient:0,humidity:0};
+
+function stamp(ms){const d=new Date(ms);return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())} ${p2(d.getHours())}:${p2(d.getMinutes())}:${p2(d.getSeconds())}`}
+const cell=(v,dec)=>v===null||v===undefined?'':v.toFixed(dec);
+function csvText(){
+  return 'fecha_hora,temperatura_interna,temperatura_ambiente,humedad_relativa\n'+
+    rows.map(r=>[stamp(r.time),cell(r.temp,1),cell(r.ambient,2),cell(r.humidity,1)].join(',')).join('\n')+(rows.length?'\n':'');
+}
+const fileName=()=>{const d=new Date();return `pez-frio_${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}.csv`};
+const every=()=>+$$('lvEvery').value;
+function everyLabel(){const o=$$('lvEvery');return o.options[o.selectedIndex].text.replace(/ \(.*\)/,'')}
+function msg(t){$$('liveMsg').textContent=t||''}
+function fileMsg(t){$$('liveFile').textContent=t||''}
+function setText2(id,t){const e=$$(id);if(e)e.textContent=t}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(rows))}catch(e){}}
+function load(){
+  try{
+    const a=JSON.parse(localStorage.getItem(KEY)||'[]');
+    return a.filter(r=>r&&Number.isFinite(r.time)).map(r=>({time:r.time,temp:r.temp??null,ambient:r.ambient??null,humidity:r.humidity??null})).sort((a,b)=>a.time-b.time);
+  }catch(e){return []}
+}
+
+/* ---------- Panel principal: se alimenta con los registros en vivo ---------- */
+const baseRender=window.renderAll;
+window.renderAll=function(...a){
+  const r=baseRender.apply(this,a);
+  if(typeof filename!=='undefined'&&filename===LIVE){
+    const n=$$('demoNote');
+    if(n)n.innerHTML='<strong>EN VIVO (USB):</strong> lecturas reales de los sensores de la placa conectada, registradas '+'cada '+everyLabel().toLowerCase()+'. Fecha y hora del reloj de este computador.';
+    setText2('topStatus','En vivo (USB)');setText2('sensorSource','Lecturas en vivo (USB)');
+  }
+  return r;
+};
+function showPage(){
+  if(!viewLive)return;
+  if(rows.filter(r=>r.temp!==null).length<2)return;
+  try{
+    data=rows.slice();demo=false;filename=LIVE;
+    if(typeof discarded!=='undefined')discarded=0;
+    window.renderAll();
+  }catch(e){console.error(e)}
+}
+
+/* ---------- Registros ---------- */
+function addRow(){
+  if(!latest)return;
+  const t=Math.floor(Date.now()/1000)*1000;
+  if(rows.length&&rows[rows.length-1].time>=t)return;
+  const r={time:t,temp:latest.temp,ambient:latest.ambient,humidity:latest.humidity};
+  if(r.temp===null&&r.ambient===null&&r.humidity===null)return;
+  rows.push(r);persist();
+  if(typeof demo!=='undefined'&&!demo&&typeof filename!=='undefined'&&filename!==LIVE&&viewLive){
+    viewLive=false;msg('Hay un CSV cargado en el panel: los datos en vivo se siguen guardando, pero no se dibujan. Recarga la página para volver al en vivo.');
+  }
+  showPage();saveToFile();updateInfo();
+}
+function updateInfo(){
+  if(!viewLive)return;
+  const need=rows.filter(r=>r.temp!==null).length;
+  msg(need<2?`Registros: ${rows.length}. El panel principal se actualiza al tener 2 registros (cada ${everyLabel().toLowerCase()}).`:`Registros en esta sesión: ${rows.length} · un registro cada ${everyLabel().toLowerCase()}.`);
+}
+function tick(){
+  if(!latest||Date.now()-latest.at>15000)return;
+  addRow();
+}
+function startTimer(){clearInterval(timer);timer=setInterval(tick,every())}
+
+/* ---------- Guardado automático en un archivo ---------- */
+async function pickFile(){
+  try{
+    fileHandle=await window.showSaveFilePicker({suggestedName:fileName(),types:[{description:'CSV',accept:{'text/csv':['.csv']}}]});
+    await saveToFile();
+  }catch(e){if(e.name!=='AbortError')fileMsg('No se pudo elegir el archivo: '+e.message)}
+}
+async function saveToFile(){
+  if(!fileHandle)return;
+  if(saving){pending=true;return}
+  saving=true;
+  try{
+    const w=await fileHandle.createWritable();
+    await w.write(csvText());await w.close();
+    fileMsg(`Guardado automático en «${fileHandle.name}» · ${rows.length} registros · ${new Date().toLocaleTimeString('es-CO')}`);
+  }catch(e){fileMsg('No se pudo guardar el archivo: '+e.message)}
+  saving=false;
+  if(pending){pending=false;saveToFile()}
+}
+function download(){
+  const url=URL.createObjectURL(new Blob([csvText()],{type:'text/csv;charset=utf-8'}));
+  const a=document.createElement('a');a.href=url;a.download=fileName();document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+
+/* ---------- Alertas ---------- */
+function limits(){
+  const s=(typeof settings!=='undefined'&&settings)||{};
+  const n=v=>(v!==null&&v!==undefined&&v!==''&&Number.isFinite(+v))?+v:null;
+  return {hi:n(s.alert)??8,lo:n(s.lower)??0,ambMax:n(s.ambientMax),hMin:n(s.humidityMin),hMax:n(s.humidityMax)};
+}
+function evaluate(){
+  const m=[],L=limits();
+  if(!latest)return m;
+  if(streak.temp>=3)m.push('DHT22 (interior): sin lectura de temperatura');
+  else if(latest.temp!==null){
+    if(latest.temp>L.hi)m.push(`Temperatura interior alta: ${latest.temp.toFixed(1)} °C (alerta sobre ${L.hi} °C)`);
+    if(latest.temp<L.lo)m.push(`Temperatura interior baja: ${latest.temp.toFixed(1)} °C (mínimo ${L.lo} °C)`);
+  }
+  if(streak.ambient>=3)m.push('Sonda DS18B20 (exterior): sin lectura');
+  else if(latest.ambient!==null&&L.ambMax!==null&&latest.ambient>L.ambMax)m.push(`Temperatura exterior alta: ${latest.ambient.toFixed(1)} °C (máx. ${L.ambMax} °C)`);
+  if(streak.humidity>=3)m.push('DHT22 (interior): sin lectura de humedad');
+  else if(latest.humidity!==null){
+    if(L.hMax!==null&&latest.humidity>L.hMax)m.push(`Humedad alta: ${latest.humidity.toFixed(1)} % (máx. ${L.hMax} %)`);
+    if(L.hMin!==null&&latest.humidity<L.hMin)m.push(`Humedad baja: ${latest.humidity.toFixed(1)} % (mín. ${L.hMin} %)`);
+  }
+  return m;
+}
+function beep(){
+  if(!audio||!$$('lvSound').checked)return;
+  try{
+    const o=audio.createOscillator(),g=audio.createGain();
+    o.type='square';o.frequency.value=880;g.gain.value=.15;o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+.45);
+  }catch(e){}
+}
+function applyAlerts(){
+  const m=evaluate(),key=m.join('|'),box=$$('liveAlert');
+  box.className=m.length?'show':'';box.innerHTML=m.map(t=>t.replace(/&/g,'&amp;').replace(/</g,'&lt;')).join('<br>');
+  document.title=m.length?'ALERTA · PEZ-FRÍO Analytics':'PEZ-FRÍO Analytics';
+  if(m.length&&key!==alertKey){beep();lastBeep=Date.now();addRow()}      // un dato raro queda registrado de inmediato
+  else if(m.length&&Date.now()-lastBeep>60000){beep();lastBeep=Date.now()}
+  alertKey=key;
+  const L=limits();
+  const cl=(id,bad)=>{$$(id).className='lvCell'+(bad?' bad':'')};
+  cl('lcInt',latest&&latest.temp!==null&&(latest.temp>L.hi||latest.temp<L.lo));
+  cl('lcExt',latest&&latest.ambient!==null&&L.ambMax!==null&&latest.ambient>L.ambMax);
+  cl('lcHum',latest&&latest.humidity!==null&&((L.hMax!==null&&latest.humidity>L.hMax)||(L.hMin!==null&&latest.humidity<L.hMin)));
+}
+
+/* ---------- Lectura del puerto serie (Web Serial) ---------- */
+function num(s,lo,hi){
+  if(s===undefined||s.trim()==='')return null;
+  const v=+s;return Number.isFinite(v)&&v>=lo&&v<=hi?v:null;
+}
+function onLine(line){
+  if(!line.startsWith('PEZ,'))return;                 // las líneas que empiezan por # se ignoran
+  const f=line.split(',');
+  if(f.length<4)return;
+  latest={temp:num(f[1],-40,80),ambient:num(f[2],-55,125),humidity:num(f[3],0,100),at:Date.now()};
+  streak.temp=latest.temp===null?streak.temp+1:0;
+  streak.ambient=latest.ambient===null?streak.ambient+1:0;
+  streak.humidity=latest.humidity===null?streak.humidity+1:0;
+  $$('lvInt').textContent=latest.temp===null?'—':latest.temp.toFixed(1)+' °C';
+  $$('lvExt').textContent=latest.ambient===null?'—':latest.ambient.toFixed(1)+' °C';
+  $$('lvHum').textContent=latest.humidity===null?'—':latest.humidity.toFixed(1)+' %';
+  applyAlerts();
+  if(rows.length===0||(rows.length&&Date.now()-rows[rows.length-1].time>every()*2))addRow(); // primer dato al conectar
+}
+function setState(text,kind){
+  setText2('liveState',text);$$('liveDot').className=kind||'';
+  $$('lvConnect').textContent=reading?'Desconectar placa':'Conectar placa';
+}
+async function readLoop(){
+  const dec=new TextDecoder();let buf='';
+  while(port&&port.readable&&reading){
+    reader=port.readable.getReader();
+    try{
+      for(;;){
+        const {value,done}=await reader.read();
+        if(done)break;
+        buf+=dec.decode(value,{stream:true});
+        const parts=buf.split(/\r?\n/);buf=parts.pop();
+        if(buf.length>400)buf='';
+        parts.forEach(l=>onLine(l.trim()));
+      }
+    }catch(e){/* cable desconectado u otro error de lectura */}
+    finally{try{reader.releaseLock()}catch(e){}}
+  }
+  reading=false;
+  try{await port.close()}catch(e){}
+  setState('Desconectada','bad');
+  msg('La placa se desconectó. Revisa el cable USB y pulsa «Conectar placa».');
+}
+async function connect(auto){
+  if(!hasSerial)return;
+  if(reading){reading=false;try{await reader.cancel()}catch(e){}return}
+  try{
+    audio=audio||new (window.AudioContext||window.webkitAudioContext)();
+    if(!port||!auto){
+      port=auto?(await navigator.serial.getPorts())[0]:await navigator.serial.requestPort();
+      if(!port)return;
+    }
+    await port.open({baudRate:115200});
+    reading=true;streak={temp:0,ambient:0,humidity:0};
+    setState('Conectada · esperando datos…','warn');
+    msg('Placa conectada. Si no llegan datos en unos segundos, pulsa el botón RST de la placa.');
+    startTimer();readLoop();
+  }catch(e){
+    if(e.name==='NotFoundError')return;          // el usuario cerró el selector
+    setState('Sin conectar','bad');
+    msg('No se pudo abrir el puerto: cierra el Monitor Serie de Arduino IDE u otro programa que lo use y vuelve a intentar. ('+e.message+')');
+  }
+}
+setInterval(()=>{
+  if(!reading)return;
+  const s=latest?Math.round((Date.now()-latest.at)/1000):null;
+  if(s!==null&&s<=15)setState('En vivo · hace '+s+' s','on');
+  else if(latest)setState('Sin datos hace '+s+' s','bad');
+},1000);
+
+/* ---------- Arranque ---------- */
+try{const saved=localStorage.getItem(KEYI);if(saved&&[...$$('lvEvery').options].some(o=>o.value===saved))$$('lvEvery').value=saved}catch(e){}
+$$('lvEvery').onchange=()=>{try{localStorage.setItem(KEYI,$$('lvEvery').value)}catch(e){}if(reading)startTimer();updateInfo();if(rows.length)showPage()};
+$$('lvConnect').onclick=()=>connect(false);
+$$('lvPick').onclick=pickFile;
+$$('lvDownload').onclick=()=>{if(!rows.length){msg('Todavía no hay registros para descargar.');return}download()};
+$$('lvNew').onclick=()=>{
+  if(!confirm('¿Empezar una sesión nueva?\nSe borran los registros que están en memoria. Los archivos ya guardados no se borran.'))return;
+  rows=[];persist();fileHandle=null;fileMsg('');msg('Sesión nueva. Los próximos registros empiezan de cero.');
+};
+if(!hasSerial){
+  $$('lvConnect').disabled=true;setState('No compatible','bad');
+  msg('Este navegador no puede conectarse a la placa. Abre esta página en Chrome o Edge, en un computador.');
+}else{
+  navigator.serial.addEventListener('connect',()=>{if(!reading){port=null;connect(true)}});
+  navigator.serial.addEventListener('disconnect',()=>{reading=false});
+  navigator.serial.getPorts().then(ps=>{if(ps.length===1)connect(true)}).catch(()=>{});
+}
+if(!hasFS){$$('lvPick').disabled=true;fileMsg('Este navegador no permite guardar automáticamente: usa «Descargar CSV ahora» o abre la página en Chrome/Edge.')}
+rows=load();
+if(rows.length){msg(`Se recuperaron ${rows.length} registros de la sesión anterior (use «Nueva sesión» para empezar de cero).`);showPage()}
+else updateInfo();
+window.addEventListener('beforeunload',e=>{if(reading){e.preventDefault();e.returnValue=''}});
+})();
+</script>
+<!-- ===== FIN MODO EN VIVO (USB) ===== -->
+</body></html>
